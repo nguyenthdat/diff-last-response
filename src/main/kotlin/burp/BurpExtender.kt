@@ -8,11 +8,9 @@ import burp.api.montoya.http.handler.HttpRequestToBeSent
 import burp.api.montoya.http.handler.HttpResponseReceived
 import burp.api.montoya.http.handler.RequestToBeSentAction
 import burp.api.montoya.http.handler.ResponseReceivedAction
-
 import burp.api.montoya.ui.editor.extension.EditorCreationContext
 import burp.api.montoya.ui.editor.extension.ExtensionProvidedHttpResponseEditor
 import burp.api.montoya.ui.editor.extension.HttpResponseEditorProvider
-
 
 class BurpExtender : BurpExtension, HttpHandler, HttpResponseEditorProvider {
     private lateinit var apiRef: MontoyaApi
