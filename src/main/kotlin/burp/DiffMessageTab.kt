@@ -6,8 +6,10 @@ import burp.api.montoya.http.message.responses.HttpResponse
 import burp.api.montoya.ui.Selection
 import burp.api.montoya.ui.editor.extension.ExtensionProvidedHttpResponseEditor
 import uniffi.diffy.DeltaKind
-import uniffi.diffy.computeDeltas
-import com.github.difflib.text.DiffRowGenerator
+import uniffi.diffy.Decorations
+import uniffi.diffy.LineBlock
+import uniffi.diffy.InlineSpan
+import uniffi.diffy.computeDecorations
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants
 import org.fife.ui.rsyntaxtextarea.Theme
@@ -144,77 +146,51 @@ class DiffMessageTab(private val api: MontoyaApi) : ExtensionProvidedHttpRespons
                     !responseBytes.contentEquals(lastMessage) &&
                     (lastMessage?.isNotEmpty() == true)
                 ) {
-                    val currentResponse = responseText.split("\n").toMutableList()
                     val previousText = api.utilities().byteUtils().convertToString(lastMessage!!)
 
-                    val highlighter = textEditor.highlighter
-                    val deltasFromRust = computeDeltas(previousText, responseText)
+                    // Pre-compute line start offsets (UTF-16 code units) for absolute highlighting
+                    val lines = responseText.split("\n")
+                    val lineStartOffsets = IntArray(lines.size + 1)
+                    var acc = 0
+                    for (i in lines.indices) {
+                        lineStartOffsets[i] = acc
+                        acc += lines[i].length + 1 // +1 for the '\n' we split on
+                    }
+                    lineStartOffsets[lines.size] = acc
 
-                    for (delta in deltasFromRust) {
-                        when (delta.kind) {
+                    // Ask Rust to compute both line-level blocks and inline spans
+                    val deco: Decorations = computeDecorations(previousText, responseText)
+
+                    // Apply line-level highlights
+                    for (blk: LineBlock in deco.lineBlocks) {
+                        when (blk.kind) {
                             DeltaKind.DELETE -> {
                                 try {
-                                    textEditor.addLineHighlight(delta.targetPosition.toInt(), Color.decode(red))
+                                    textEditor.addLineHighlight(blk.startLine.toInt(), Color.decode(red))
                                 } catch (_: BadLocationException) {}
                             }
                             DeltaKind.INSERT -> {
-                                try {
-                                    val start = delta.targetPosition.toInt()
-                                    val end = start + delta.targetLines.size
-                                    var i = start
-                                    while (i < end) {
-                                        textEditor.addLineHighlight(i, Color.decode(green))
-                                        i++
-                                    }
-                                } catch (_: BadLocationException) {}
-                            }
-                            DeltaKind.CHANGE -> {
-                                val linePos = delta.targetPosition.toInt()
-                                var pos = 0
-                                var i = 0
-                                while (i < linePos) {
-                                    pos += currentResponse[i].length + 1
+                                val start = blk.startLine.toInt()
+                                val end = start + blk.lineCount.toInt()
+                                var i = start
+                                while (i < end) {
+                                    try { textEditor.addLineHighlight(i, Color.decode(green)) } catch (_: BadLocationException) {}
                                     i++
                                 }
-                                val finalPos = pos
-                                val generator = DiffRowGenerator.create()
-                                    .showInlineDiffs(true)
-                                    .mergeOriginalRevised(true)
-                                    .inlineDiffByWord(true)
-                                    .lineNormalizer { f: String? -> f }
-                                    .processDiffs { diff: String? ->
-                                        val targetLines = delta.targetLines
-                                        var currentLinePos = finalPos
-                                        var j = 0
-                                        while (j < targetLines.size) {
-                                            val line = targetLines[j]
-                                            val foundPos = line.indexOf(diff!!)
-                                            if (foundPos != -1) {
-                                                val start = currentLinePos + foundPos
-                                                val end = start + diff.length
-                                                addHighlight(start, end, highlighter, modifiedPainter)
-                                                break
-                                            } else {
-                                                currentLinePos += line.length + 1
-                                            }
-                                            j++
-                                        }
-                                        diff
-                                    }
-                                    .build()
-
-                                generator.generateDiffRows(delta.sourceLines, delta.targetLines)
-
-                                var currentLine = linePos + 1
-                                var k = delta.sourceLines.size
-                                while (k < delta.targetLines.size) {
-                                    try {
-                                        textEditor.addLineHighlight(currentLine, Color.decode(green))
-                                    } catch (_: BadLocationException) {}
-                                    currentLine++
-                                    k++
-                                }
                             }
+                            // For CHANGE, we rely on inline spans below to avoid double-highlighting whole lines
+                            DeltaKind.CHANGE -> {}
+                        }
+                    }
+
+                    // Apply inline (word/char) highlights using absolute offsets computed from line + UTF-16 columns
+                    val highlighter = textEditor.highlighter
+                    for (span: InlineSpan in deco.inlineSpans) {
+                        val base = if (span.line.toInt() < lineStartOffsets.size) lineStartOffsets[span.line.toInt()] else 0
+                        val start = base + span.startColUtf16.toInt()
+                        val end = base + span.endColUtf16.toInt()
+                        if (start < end && end <= responseText.length + 1) {
+                            addHighlight(start, end, highlighter, modifiedPainter)
                         }
                     }
                 }

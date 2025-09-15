@@ -713,6 +713,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -728,7 +730,9 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 // when the library is loaded.
 internal interface IntegrityCheckingUniffiLib : Library {
     // Integrity check functions only
-    fun uniffi_diffy_checksum_func_computedeltas(
+    fun uniffi_diffy_checksum_func_computedecorations(
+): Short
+fun uniffi_diffy_checksum_func_computedeltas(
 ): Short
 fun ffi_diffy_uniffi_contract_version(
 ): Int
@@ -775,7 +779,9 @@ internal interface UniffiLib : Library {
     }
 
     // FFI functions
-    fun uniffi_diffy_fn_func_computedeltas(`previous`: RustBuffer.ByValue,`current`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_diffy_fn_func_computedecorations(`previous`: RustBuffer.ByValue,`current`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_diffy_fn_func_computedeltas(`previous`: RustBuffer.ByValue,`current`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun ffi_diffy_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -903,6 +909,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_diffy_checksum_func_computedecorations() != 34590.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_diffy_checksum_func_computedeltas() != 50882.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1067,6 +1076,38 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 
 
 
+data class Decorations (
+    var `lineBlocks`: List<LineBlock>, 
+    var `inlineSpans`: List<InlineSpan>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDecorations: FfiConverterRustBuffer<Decorations> {
+    override fun read(buf: ByteBuffer): Decorations {
+        return Decorations(
+            FfiConverterSequenceTypeLineBlock.read(buf),
+            FfiConverterSequenceTypeInlineSpan.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Decorations) = (
+            FfiConverterSequenceTypeLineBlock.allocationSize(value.`lineBlocks`) +
+            FfiConverterSequenceTypeInlineSpan.allocationSize(value.`inlineSpans`)
+    )
+
+    override fun write(value: Decorations, buf: ByteBuffer) {
+            FfiConverterSequenceTypeLineBlock.write(value.`lineBlocks`, buf)
+            FfiConverterSequenceTypeInlineSpan.write(value.`inlineSpans`, buf)
+    }
+}
+
+
+
 data class Delta (
     var `kind`: DeltaKind, 
     /**
@@ -1111,6 +1152,87 @@ public object FfiConverterTypeDelta: FfiConverterRustBuffer<Delta> {
             FfiConverterUInt.write(value.`targetPosition`, buf)
             FfiConverterSequenceString.write(value.`sourceLines`, buf)
             FfiConverterSequenceString.write(value.`targetLines`, buf)
+    }
+}
+
+
+
+data class InlineSpan (
+    /**
+     * Line index in the *current* text.
+     */
+    var `line`: kotlin.UInt, 
+    /**
+     * Start column in UTF-16 code units.
+     */
+    var `startColUtf16`: kotlin.UInt, 
+    /**
+     * End column (exclusive) in UTF-16 code units.
+     */
+    var `endColUtf16`: kotlin.UInt
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInlineSpan: FfiConverterRustBuffer<InlineSpan> {
+    override fun read(buf: ByteBuffer): InlineSpan {
+        return InlineSpan(
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: InlineSpan) = (
+            FfiConverterUInt.allocationSize(value.`line`) +
+            FfiConverterUInt.allocationSize(value.`startColUtf16`) +
+            FfiConverterUInt.allocationSize(value.`endColUtf16`)
+    )
+
+    override fun write(value: InlineSpan, buf: ByteBuffer) {
+            FfiConverterUInt.write(value.`line`, buf)
+            FfiConverterUInt.write(value.`startColUtf16`, buf)
+            FfiConverterUInt.write(value.`endColUtf16`, buf)
+    }
+}
+
+
+
+data class LineBlock (
+    var `kind`: DeltaKind, 
+    var `startLine`: kotlin.UInt, 
+    var `lineCount`: kotlin.UInt
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLineBlock: FfiConverterRustBuffer<LineBlock> {
+    override fun read(buf: ByteBuffer): LineBlock {
+        return LineBlock(
+            FfiConverterTypeDeltaKind.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LineBlock) = (
+            FfiConverterTypeDeltaKind.allocationSize(value.`kind`) +
+            FfiConverterUInt.allocationSize(value.`startLine`) +
+            FfiConverterUInt.allocationSize(value.`lineCount`)
+    )
+
+    override fun write(value: LineBlock, buf: ByteBuffer) {
+            FfiConverterTypeDeltaKind.write(value.`kind`, buf)
+            FfiConverterUInt.write(value.`startLine`, buf)
+            FfiConverterUInt.write(value.`lineCount`, buf)
     }
 }
 
@@ -1200,6 +1322,74 @@ public object FfiConverterSequenceTypeDelta: FfiConverterRustBuffer<List<Delta>>
         }
     }
 }
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeInlineSpan: FfiConverterRustBuffer<List<InlineSpan>> {
+    override fun read(buf: ByteBuffer): List<InlineSpan> {
+        val len = buf.getInt()
+        return List<InlineSpan>(len) {
+            FfiConverterTypeInlineSpan.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<InlineSpan>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeInlineSpan.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<InlineSpan>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeInlineSpan.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeLineBlock: FfiConverterRustBuffer<List<LineBlock>> {
+    override fun read(buf: ByteBuffer): List<LineBlock> {
+        val len = buf.getInt()
+        return List<LineBlock>(len) {
+            FfiConverterTypeLineBlock.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<LineBlock>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeLineBlock.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<LineBlock>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeLineBlock.write(it, buf)
+        }
+    }
+}
+        /**
+         * Compute line blocks and UTF-16-aware inline spans for changed lines.
+         */ fun `computeDecorations`(`previous`: kotlin.String, `current`: kotlin.String): Decorations {
+            return FfiConverterTypeDecorations.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_diffy_fn_func_computedecorations(
+        FfiConverterString.lower(`previous`),FfiConverterString.lower(`current`),_status)
+}
+    )
+    }
+    
+
         /**
          * Compute grouped line-level deltas. We coalesce a Rem+Add pair into a single CHANGE.
          */ fun `computeDeltas`(`previous`: kotlin.String, `current`: kotlin.String): List<Delta> {
