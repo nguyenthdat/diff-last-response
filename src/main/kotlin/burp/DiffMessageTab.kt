@@ -14,9 +14,11 @@ import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants
 import org.fife.ui.rsyntaxtextarea.Theme
 import org.fife.ui.rtextarea.RTextScrollPane
+import org.fife.ui.rtextarea.Gutter
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
+import java.awt.Font
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import java.io.IOException
@@ -34,10 +36,11 @@ class DiffMessageTab(private val api: MontoyaApi) : ExtensionProvidedHttpRespons
     private val textEditor = RSyntaxTextArea(20, 60)
     private val scrollPane = RTextScrollPane(textEditor)
 
-    private val red = "#dc3545"
-    private val green = "#28a745"
-    private val blue = "#0d6efd"
-    private val modifiedPainter: Highlighter.HighlightPainter = DefaultHighlightPainter(Color.decode(blue))
+    // Diff highlight colors are theme-aware (set in configureEditorTheme)
+    private var lineDeleteColor: Color = Color(0xDC, 0x35, 0x45) // light theme default
+    private var lineInsertColor: Color = Color(0x28, 0xA7, 0x45) // light theme default
+    private var inlineChangeColor: Color = Color(0x0D, 0x6E, 0xFD, 110) // translucent for inline spans
+    private var modifiedPainter: Highlighter.HighlightPainter = DefaultHighlightPainter(inlineChangeColor)
     private var currentMessage: ByteArray? = null
     private var componentShown = false
     private val maxBytes = 750000
@@ -53,27 +56,78 @@ class DiffMessageTab(private val api: MontoyaApi) : ExtensionProvidedHttpRespons
                     diffContainer.removeAll()
                     textEditor.lineWrap = true
                     textEditor.isEditable = false
-                    textEditor.antiAliasingEnabled = false
+                    textEditor.antiAliasingEnabled = true
                     scrollPane.setAutoscrolls(true)
                     val caret = textEditor.caret as DefaultCaret
                     caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE)
 
-                    if (UIManager.getLookAndFeel().id.contains("Dar")) {
-                        try {
-                            val theme = Theme.load(
-                                javaClass.getResourceAsStream(
-                                    "/org/fife/ui/rsyntaxtextarea/themes/dark.xml"
-                                )
-                            )
-                            theme.apply(textEditor)
-                        } catch (_: IOException) {
-                        }
-                    }
+                    configureEditorTheme()
+
                     diffContainer.add(scrollPane)
                 }
                 componentShown = true
             }
         })
+    }
+
+    private fun isDarkLaf(): Boolean {
+        val lafName = UIManager.getLookAndFeel()?.name?.lowercase(Locale.getDefault()) ?: ""
+        if (lafName.contains("darcula") || lafName.contains("dark")) return true
+        val bg = UIManager.getColor("Panel.background") ?: return false
+        val luminance = 0.2126 * bg.red + 0.7152 * bg.green + 0.0722 * bg.blue
+        return luminance < 128
+    }
+
+    private fun configureEditorTheme() {
+        val dark = isDarkLaf()
+
+        // Baseline editor tweaks for readability
+        textEditor.antiAliasingEnabled = true
+        textEditor.isCodeFoldingEnabled = false
+        textEditor.highlightCurrentLine = false
+        textEditor.fadeCurrentLineHighlight = true
+        textEditor.markOccurrences = false
+
+        // Respect IDE font if available
+        UIManager.getFont("TextArea.font")?.let { f ->
+            textEditor.font = f.deriveFont(Font.PLAIN, f.size2D)
+        }
+
+        if (dark) {
+            try {
+                val theme = Theme.load(
+                    javaClass.getResourceAsStream("/org/fife/ui/rsyntaxtextarea/themes/dark.xml")
+                )
+                theme.apply(textEditor)
+            } catch (_: IOException) {}
+
+            // Softer translucent accents for dark background
+            lineDeleteColor = Color(239, 83, 80, 80)
+            lineInsertColor = Color(76, 175, 80, 80)
+            inlineChangeColor = Color(33, 150, 243, 110)
+        } else {
+            // Gentle overlays for light background
+            lineDeleteColor = Color(220, 53, 69, 60)
+            lineInsertColor = Color(40, 167, 69, 60)
+            inlineChangeColor = Color(13, 110, 253, 90)
+        }
+        modifiedPainter = DefaultHighlightPainter(inlineChangeColor)
+
+        // Gutter styling
+        val gutter: Gutter = scrollPane.gutter
+        if (dark) {
+            gutter.background = Color(0x22, 0x22, 0x22)
+            gutter.foreground = Color(0xBB, 0xBB, 0xBB)
+            gutter.borderColor = Color(0x33, 0x33, 0x33)
+            gutter.lineNumberColor = Color(0x99, 0x99, 0x99)
+        } else {
+            gutter.background = Color(0xF7, 0xF7, 0xF7)
+            gutter.foreground = Color(0x44, 0x44, 0x44)
+            gutter.borderColor = Color(0xDD, 0xDD, 0xDD)
+            gutter.lineNumberColor = Color(0x77, 0x77, 0x77)
+        }
+        gutter.isFoldIndicatorEnabled = false
+        gutter.lineNumbersEnabled = true
     }
 
     private fun addHighlight(
@@ -166,7 +220,7 @@ class DiffMessageTab(private val api: MontoyaApi) : ExtensionProvidedHttpRespons
                         when (blk.kind) {
                             DeltaKind.DELETE -> {
                                 try {
-                                    textEditor.addLineHighlight(blk.startLine.toInt(), Color.decode(red))
+                                    textEditor.addLineHighlight(blk.startLine.toInt(), lineDeleteColor)
                                 } catch (_: BadLocationException) {}
                             }
                             DeltaKind.INSERT -> {
@@ -174,7 +228,7 @@ class DiffMessageTab(private val api: MontoyaApi) : ExtensionProvidedHttpRespons
                                 val end = start + blk.lineCount.toInt()
                                 var i = start
                                 while (i < end) {
-                                    try { textEditor.addLineHighlight(i, Color.decode(green)) } catch (_: BadLocationException) {}
+                                    try { textEditor.addLineHighlight(i, lineInsertColor) } catch (_: BadLocationException) {}
                                     i++
                                 }
                             }
