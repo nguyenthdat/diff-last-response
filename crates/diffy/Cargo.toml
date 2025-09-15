@@ -1,0 +1,21 @@
+[package]
+name = "diffy"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "bindgen.rs"
+
+[lib]
+crate-type = ["cdylib"]
+name = "diffy"
+
+[dependencies]
+difference = "2.0.0"
+uniffi = { version = "0.29", features = ["bindgen", "tokio", "cli"] }
